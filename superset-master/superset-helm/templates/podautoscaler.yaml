@@ -1,0 +1,33 @@
+{{- if .Values.podautoscaler.enabled -}}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "superset-helm.fullname" . }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment 
+    name: {{ include "superset-helm.fullname" . }}
+  minReplicas: {{ .Values.podautoscaler.minReplicas }}
+  maxReplicas: {{ .Values.podautoscaler.maxReplicas }}
+  metrics:
+  {{- if .Values.podautoscaler.memoryEnabled }} 
+  - type: Resource
+    resource:
+      name: memory 
+      target:
+        type: Utilization 
+        averageUtilization: {{ .Values.podautoscaler.maxMemoryPercent }}
+  {{- end }}
+  {{- if .Values.podautoscaler.cpuEnabled }} 
+  - type: Resource
+    resource:
+      name: cpu 
+      target:
+        type: Utilization 
+        averageUtilization: {{ .Values.podautoscaler.maxCpuPercent }}
+  {{- end }}
+  behavior: 
+    scaleUp: 
+      stabilizationWindowSeconds: {{ .Values.podautoscaler.scaleUpStabilization }}
+{{- end -}}

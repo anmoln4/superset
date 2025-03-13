@@ -1,0 +1,79 @@
+{{- if .Values.redisEnabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "superset-helm.fullname" . }}-redis
+  labels:
+    {{- include "superset-helm.labels" . | nindent 4 }}-redis
+    app-name: {{ include "superset-helm.fullname" . }}-redis
+spec:
+  replicas: {{ .Values.redisReplicaCount }}
+  selector:
+    matchLabels:
+      {{- include "superset-helm.selectorLabels" . | nindent 6 }}-redis
+  template:
+    metadata:
+      labels:
+        {{- include "superset-helm.selectorLabels" . | nindent 8 }}-redis
+    spec:
+    {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+    {{- end }}
+      serviceAccountName: {{ .Values.serviceAccount.name }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: redis-helm
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.redisImage.repository }}:latest"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.redisService.containerPort  }}
+              protocol: TCP
+          {{- if .Values.liveness.enabled }}
+          livenessProbe:
+            tcpSocket:
+              port: {{ .Values.liveness.redisport }}
+            initialDelaySeconds: {{ .Values.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.liveness.periodSeconds }}
+            timeoutSeconds: {{ .Values.liveness.timeoutSeconds }}
+            successThreshold: {{ .Values.liveness.successThreshold }}
+            failureThreshold: {{ .Values.liveness.failureThreshold }}
+          {{- end }}
+          {{- if .Values.readiness.enabled }}
+          readinessProbe:
+            tcpSocket:
+              port: {{ .Values.liveness.redisport }}
+            initialDelaySeconds: {{ .Values.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.readiness.periodSeconds }}
+            timeoutSeconds: {{ .Values.readiness.timeoutSeconds }}
+            successThreshold: {{ .Values.readiness.successThreshold }}
+            failureThreshold: {{ .Values.readiness.failureThreshold }}
+          {{- end }}
+          resources:
+            {{- toYaml .Values.resourcesredis | nindent 12 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    {{- if .Values.affinity.enabled }}
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: {{ .Values.affinity.key }}
+                    operator: In
+                    values:
+                    {{- range .Values.affinity.values }}
+                      - {{ . }}
+                    {{- end }}
+    {{- end }}
+    {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+    {{- end }}
+{{- end }}

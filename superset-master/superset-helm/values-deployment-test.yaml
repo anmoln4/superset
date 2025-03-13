@@ -1,0 +1,136 @@
+# Default values for superset-helm.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+replicaCount: 1
+redisReplicaCount: 1
+redisEnabled: false
+redisImage:
+  repository: docker.io/redis
+image:
+  repository: au.icr.io/xsmtest/supersetdev
+  pullPolicy: Always
+  imageTag: latest
+cicd:
+  image:
+    repository: 663481951700.dkr.ecr.ap-south-1.amazonaws.com/baseimages
+
+imagePullSecrets:
+  - name: "all-icr-io"
+nameOverride: ""
+fullnameOverride: "superset-test"
+
+serviceAccount:
+  # Specifies whether a service account should be created
+  create: false
+  name: qa
+
+podSecurityContext: {}
+  # fsGroup: 2000
+
+securityContext: {}
+  # capabilities:
+  #   drop:
+  #   - ALL
+  # readOnlyRootFilesystem: true
+  # runAsNonRoot: true
+  # runAsUser: 1000
+redisService:
+  type: ClusterIP
+  svcport: 80
+  containerPort: 6379
+service:
+  type: ClusterIP
+  svcport: 80
+  containerPort: 8088
+
+liveness:
+  enabled: true
+  supersetport: 8088
+  redisport: 6379
+  initialDelaySeconds: 180 
+  periodSeconds: 10
+  timeoutSeconds: 1
+  successThreshold: 1
+  failureThreshold: 3
+
+readiness:
+  enabled: true
+  supersetport: 8088
+  redisport: 6379
+  initialDelaySeconds: 180 
+  periodSeconds: 10
+  timeoutSeconds: 10
+  successThreshold: 1
+  failureThreshold: 3
+
+podautoscaler:
+  enabled: true
+  cpuEnabled: true
+  memoryEnabled: true
+  maxReplicas: 5
+  minReplicas: 1
+  maxCpuPercent: 70
+  maxMemoryPercent: 70
+  scaleUpStabilization: 180
+
+
+
+ingress:
+  ingressClassName: nginx
+  pathType: Prefix
+  enabled: true
+  annotations: 
+    # kubernetes.io/ingress.class: nginx
+    # kubernetes.io/tls-acme: "true"
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      proxy_set_header 'X-ProxyScheme' 'https';
+      proxy_set_header 'X-ProxyPort' '8443';
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: '3600'
+    nginx.ingress.kubernetes.io/proxy-read-timeout: '3600'
+    nginx.ingress.kubernetes.io/proxy-redirect-from: http://analyticstest.dryice-aws.com
+    nginx.ingress.kubernetes.io/proxy-redirect-to: https://analyticstest.dryice-aws.com
+    nginx.ingress.kubernetes.io/proxy-send-timeout: '3600'
+  hosts:
+    - host: analyticstest.dryice-aws.com
+      paths: [/]
+  tls: []
+  #  - secretName: chart-example-tls
+  #    hosts:
+  #      - chart-example.local
+
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity:
+  enabled: true
+  key: Env
+  values:
+    - qa
+resourcessuperset: 
+    limits: 
+      cpu: 1000m
+      memory: 1Gi
+    requests:
+      cpu: 1000m
+      memory: 1Gi
+resourcesredis: 
+    limits: 
+      cpu: 50m
+      memory: 250Mi
+    requests:
+      cpu: 50m
+      memory: 250Mi
+openBao:
+  enabled: true
+ecrImages:
+  liquibase:
+    imageTag: liquibase-4.25
+  awscli:
+    imageTag: xsmsre-awscli-jq
+  cron:
+    imageTag: alpine-curl
+  kubectl:
+    imageTag: xsmsre-awscli-jq-kubectl

@@ -1,0 +1,234 @@
+pipeline {
+	agent { 
+		label "${env.BRANCH_NAME==null||env.BRANCH_NAME.equalsIgnoreCase('master') ? 'jenkins-slave-prod' : 'jenkins-slave-dev'}" 
+		}
+
+	triggers {
+		GenericTrigger(
+			genericVariables: [
+				[ key: 'committer_name', value: '$.commits[0].author.name' ],
+				[ key: 'committer_email', value: '$.commits[0].author.email' ],
+				[ key: 'REF', value: '$.ref'],
+				[ key: 'EVENT_NAME', value: '$.event_name'],
+				[ key: 'branch', value: '$.ref', regexpFilter: 'refs/heads/' ],
+				[ key: 'tag', value: '$.ref', regexpFilter: 'refs/tags/'],
+				[ key: 'projectid', value: '$.project.id'],
+				[ key: 'projectname', value: '$.project.name'],
+			],
+			causeString: '$committer_name pushed in branch : $branch with tag : $tag',
+			token: env.JOB_NAME,
+			printContributedVariables: true,
+			printPostContent: true,
+		)
+	}
+	 parameters {
+        string(name: 'VERSION', defaultValue: 'latest', description: 'Docker Images Tagged Version')
+		string(name: 'INSTANCE_NAME', defaultValue: env.BRANCH_NAME, description: 'NAME OF THE INSTANCE')
+		string(name: 'ENV_NAME', defaultValue: env.BRANCH_NAME, description: 'Instance Environment/Cluster Namespace')
+    }
+
+	stages {
+		stage('config'){
+				steps {
+					script {
+		 
+			 			def job_name=env.BRANCH_NAME
+						if(env.BRANCH_NAME==null)
+				    		{
+				        		echo "env.BRANCH_NAME is NULL"
+								// branch name will be null when its tag based deployment, in which case branch will be master
+								// if in future tag are supported even on dev or test branch, we hould add logic here to figure
+								// out the branch from the tag
+				        		env.BRANCH_NAME='master'
+								job_name='-release'
+							
+				    		}
+						if((env.EVENT_NAME!=null)&&(env.EVENT_NAME.equalsIgnoreCase("push")))
+						{
+							env.VERSION='latest'
+						}
+						else if((env.EVENT_NAME!=null)&&(env.EVENT_NAME.equalsIgnoreCase("tag_push")))
+						{
+							env.VERSION=env.REF.substring(env.REF.lastIndexOf('/')+1)
+							//env.BRANCH_NAME=env.TAG_NAME
+							currentBuild.displayName=env.BUILD_DISPLAY_NAME+"--Release-"+env.VERSION
+
+						}
+						
+						def branch_config
+						
+						if(((env.BRANCH_NAME=="master"||env.BRANCH_NAME==null) && env.EVENT_NAME==null)){
+						dir ('config') {
+							def BASE_VERSION="${VERSION}"
+							if("${VERSION}".matches("(.*)_HF(.*)"))
+							{
+								BASE_VERSION="${VERSION}".substring(0,"${VERSION}".indexOf("_HF"));
+							}
+
+									checkout([$class: 'GitSCM', branches: [[name: "refs/tags/${BASE_VERSION}"]],userRemoteConfigs: [[credentialsId: "xsm-sre-git-ssh-key", url: "ssh://git@us-south.git.cloud.ibm.com/configurations/sx/${INSTANCE_NAME}/${ENV_NAME}"]]])
+											}
+
+						sh ' ls -al config'
+                       		sh 'cp config/app-config/superset/values-deployment-${INSTANCE_NAME}-${ENV_NAME}.yaml ./superset-helm/values-deployment-${INSTANCE_NAME}.yaml'  
+                      		sh 'cp config/app-config/superset/values-env-${INSTANCE_NAME}-${ENV_NAME}.yaml ./superset-helm/values-env-${INSTANCE_NAME}.yaml' 
+						sh 'cp config/app-config/jenkins-configurations.json .'
+						sh 'cp config/app-config/instance-details-${INSTANCE_NAME}-${ENV_NAME}.json .'
+						
+						echo "Using if part"
+						
+							def CONFIG_FILE = 'jenkins-configurations.json'
+							def config = readJSON file:"$CONFIG_FILE"
+							branch_config = config."${INSTANCE_NAME}"
+								if(branch_config){
+								echo "using config for instance ${INSTANCE_NAME}"
+							}
+							else{
+									echo "${INSTANCE_NAME} config does not exits"
+								}
+							def INSTANCE_DETAILS_FILE = "instance-details-${INSTANCE_NAME}-${ENV_NAME}.json"
+							def instanceconfigfile = readJSON file:"$INSTANCE_DETAILS_FILE"
+							env.MS_VERSION= instanceconfigfile."microservices"."superset"."version"
+
+						}
+						
+						else {
+						
+						echo "Using else"
+						configFileProvider([configFile(fileId: 'xsm-jenkins-configurations', variable: 'BRANCH_SETTINGS')]) {
+						def config = readJSON file:"$BRANCH_SETTINGS"
+						branch_config = config."${BRANCH_NAME}"
+
+						if(branch_config){
+							echo "using config for branch ${BRANCH_NAME}"
+						}
+						else{
+							branch_config = config.default                      
+						}
+						}
+						}
+					
+				
+   
+				env.CLUSTER_NAME= branch_config.'CLUSTER_NAME'
+				env.CLUSTER_API_URL = branch_config.'CLUSTER_API_URL'
+                env.CLUSTER_SECRET_TEXT= branch_config.'CLUSTER_SECRET_TEXT'
+                env.ARGS=branch_config.'SUPERSET_ARGS'
+				env.MS_NAME='superset'
+				env.IMAGE_REPOSITORY_Namespace= branch_config.'IMAGE_REPOSITORY_NS'
+				env.repo_name=env.IMAGE_REPOSITORY_Namespace + "/" + env.MS_NAME.toLowerCase() + job_name.toLowerCase()
+                //env.repo_name=env.IMAGE_REPOSITORY_Namespace + "/" + env.JOB_NAME.minus("/").toLowerCase()
+				env.IMAGE_REPOSITORY=branch_config.'IMAGE_REPOSITORY' + env.repo_name
+				
+				
+				configFileProvider([configFile(fileId: 'ecr-repo-policies-text', variable: 'REPO_POLICIES')]){
+                  def repo_policies = readJSON file:"$REPO_POLICIES"
+                  env.repo_policy   = repo_policies."${IMAGE_REPOSITORY_Namespace}"
+                }
+				configFileProvider([configFile(fileId: 'ecr-repo-lifecycle-policies-text', variable: 'REPO_LIFECYCLE_POLICIES')]){
+                  def repo_lifecycle_policies = readJSON file:"$REPO_LIFECYCLE_POLICIES"
+                  env.repo_lifecycle_policy   = repo_lifecycle_policies."${IMAGE_REPOSITORY_Namespace}"
+                }
+
+				
+ 
+						echo "INSTANCE_NAME				:	${INSTANCE_NAME}"
+						echo "CLUSTER_NAME				:	${CLUSTER_NAME}"
+						echo "CLUSTER_NAMESPACE_NAME	:	${ENV_NAME}"
+						echo "CLUSTER_API_URL			:	${CLUSTER_API_URL}"
+						echo "CLUSTER_SECRET_TEXT		:	${CLUSTER_SECRET_TEXT}"
+						echo "ARGS			            :	${ARGS}"
+						echo "IMAGE_REPOSITORY			:	${IMAGE_REPOSITORY}"
+
+						echo '********************** final list of env ***********************************'
+						sh 'env'
+
+			}
+
+		}
+    }
+		
+
+		stage('package') {
+			when{
+				expression{(env.BRANCH_NAME=="master" && env.VERSION!="latest" && env.EVENT_NAME=="tag_push")||((env.BRANCH_NAME!="master") && (env.EVENT_NAME==null || env.EVENT_NAME=="push")) }
+			}  
+				steps {
+				
+					//Logic to check whether repo on ECR exists or not. If repo does not exists it will create the repo.
+						
+						withAWS(roleAccount:'663481951700', role:'ci-iam-role'){
+						sh 'aws ecr describe-repositories --repository-names ${repo_name} --region ap-south-1 || aws ecr create-repository --repository-name ${repo_name} --region ap-south-1'
+						sh 'aws ecr set-repository-policy --repository-name ${repo_name} --region ap-south-1 --policy-text ${repo_policy}'
+						sh 'aws ecr put-lifecycle-policy --repository-name ${repo_name} --region ap-south-1 --lifecycle-policy-text ${repo_lifecycle_policy}'
+						}
+
+				
+					echo 'Starting to build docker image'
+
+					script {			   
+						docker.withRegistry('https://663481951700.dkr.ecr.ap-south-1.amazonaws.com', "ecr:ap-south-1:AWS-jenkins-ec2") {
+                    		IMAGEREPOSITORY =  env.BRANCH_NAME!="master"?"663481951700.dkr.ecr.ap-south-1.amazonaws.com/baseimages:apache-superset_3.0.0_nonprod":"663481951700.dkr.ecr.ap-south-1.amazonaws.com/baseimagesprod:apache-superset_3.0.0_prod"
+							def customImage = docker.build("${IMAGE_REPOSITORY}:${VERSION}", "--build-arg IMAGEREPOSITORY="+IMAGEREPOSITORY+ " .")
+                     		customImage.push()
+						}
+					}
+				}
+		}
+      
+        stage('helm deploy'){
+			when{
+				expression{ ((env.BRANCH_NAME!="master") && (env.EVENT_NAME==null || env.EVENT_NAME=="push"))||(env.BRANCH_NAME=="master" && env.VERSION!="latest" && env.EVENT_NAME==null) }
+			}
+				agent {
+					docker {
+						image env.BRANCH_NAME!="master"?"baseimages:xsmsre-helmagent":"baseimagesprod:xsmsre-helmagent"
+						registryUrl "https://663481951700.dkr.ecr.ap-south-1.amazonaws.com/"
+						registryCredentialsId "ecr:ap-south-1:AWS-jenkins-ec2"			  
+						args '-u root'
+						// Run the container on the node specified at the top-level of the Pipeline, in the same workspace, rather than on a new node entirely:
+						reuseNode true
+					}
+				}
+
+				steps {
+                     script{       
+					withKubeConfig([credentialsId: "${CLUSTER_SECRET_TEXT}",
+                    serverUrl: "${CLUSTER_API_URL}",
+                    clusterName: "${CLUSTER_NAME}",
+                    namespace: "${ENV_NAME}"
+                    ]) {
+
+						//sh 'helm mapkubeapis superset-${INSTANCE_NAME} --namespace ${ENV_NAME}'
+
+						
+						if((env.BRANCH_NAME=="master" && env.VERSION!="latest" && env.EVENT_NAME==null))
+							{
+								
+							sh 'helm upgrade --install superset-${INSTANCE_NAME} ./superset-helm --values ./superset-helm/values-deployment-${INSTANCE_NAME}.yaml --values ./superset-helm/values-env-${INSTANCE_NAME}.yaml --set fullnameOverride=superset-${INSTANCE_NAME} --set image.imageTag=${MS_VERSION} --set imagePullSecrets=null ${ARGS}'
+							
+							}
+						
+						else{
+						sh 'helm upgrade --install superset-${INSTANCE_NAME} ./superset-helm --values ./superset-helm/values-deployment-${INSTANCE_NAME}.yaml --values ./superset-helm/values-env-${INSTANCE_NAME}.yaml --set image.repository=${IMAGE_REPOSITORY} --set image.imageTag=${VERSION} --set imagePullSecrets=null ${ARGS}'
+						}
+
+						
+					
+           
+				}
+				}
+		}
+ 
+	}
+
+}
+post {
+        // Clean after build
+        always {
+            cleanWs()
+			//sh 'cd /home/ec2-user/workspace '
+			//sh 'ls -lrt' 
+        }
+    }
+
+}

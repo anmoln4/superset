@@ -1,0 +1,107 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "superset-helm.fullname" . }}
+  labels:
+    {{- include "superset-helm.labels" . | nindent 4 }}
+    app-name: {{ include "superset-helm.fullname" . }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "superset-helm.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "superset-helm.selectorLabels" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+    spec:
+      serviceAccountName: {{ .Values.serviceAccount.name }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+    {{- if .Values.openBao.enabled }}
+      initContainers:
+        - name: openbao-secret
+          image: "{{ .Values.cicd.image.repository }}:{{ .Values.ecrImages.kubectl.imageTag }}"
+          command:
+            - sh
+            - '-c'
+            - >-
+              kubectl get secret openbao-root-token -o json | jq -r
+              '.data["root-token"]' | base64 --decode >
+              /data/openbao/root-token.txt
+          volumeMounts:
+            - name: openbao
+              mountPath: /data/openbao
+    {{- end }}
+
+      containers:
+        - name: {{ .Chart.Name }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.imageTag }}"
+          envFrom:
+          - configMapRef:
+              name: {{ .Values.fullnameOverride }}-configmap
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          lifecycle:
+            postStart:
+              exec:
+                command: 
+                  - {{ "/bin/sh" }}
+                  - {{ "-c" }}
+                  - {{ "sleep 60 && superset fab create-admin --username adminSXRoar --firstname Superset  --lastname Admin --email adminSXRoar@hcl.com --password adminSXRoar@HCL && superset db upgrade && superset init" }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.containerPort  }}
+              protocol: TCP
+          {{- if .Values.liveness.enabled }}
+          livenessProbe:
+            tcpSocket:
+              port: {{ .Values.liveness.supersetport }}
+            initialDelaySeconds: {{ .Values.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.liveness.periodSeconds }}
+            timeoutSeconds: {{ .Values.liveness.timeoutSeconds }}
+            successThreshold: {{ .Values.liveness.successThreshold }}
+            failureThreshold: {{ .Values.liveness.failureThreshold }}
+          {{- end }}
+          {{- if .Values.readiness.enabled }}
+          readinessProbe:
+            tcpSocket:
+              port: {{ .Values.liveness.supersetport }}
+            initialDelaySeconds: {{ .Values.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.readiness.periodSeconds }}
+            timeoutSeconds: {{ .Values.readiness.timeoutSeconds }}
+            successThreshold: {{ .Values.readiness.successThreshold }}
+            failureThreshold: {{ .Values.readiness.failureThreshold }}
+          {{- end }}
+          volumeMounts:
+            - name: openbao
+              mountPath: /data/openbao
+          resources:
+            {{- toYaml .Values.resourcessuperset | nindent 12 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    {{- if .Values.affinity.enabled }}
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: {{ .Values.affinity.key }}
+                    operator: In
+                    values:
+                    {{- range .Values.affinity.values }}
+                      - {{ . }}
+                    {{- end }}
+    {{- end }}
+    {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+    {{- end }}
+      volumes:
+        - name: openbao
+          emptyDir: {}

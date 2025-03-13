@@ -1,0 +1,35 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "superset-helm.fullname" . }}
+  labels:
+    {{- include "superset-helm.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - port: {{ .Values.service.svcport }}
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "superset-helm.selectorLabels" . | nindent 4 }}
+
+---
+
+{{- if .Values.redisEnabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: superset-redis
+  labels: 
+    {{- include "superset-helm.labels" . | nindent 4 }}-redis
+spec: 
+  type: {{ .Values.redisService.type }}
+  ports: 
+    - port: {{ .Values.redisService.containerPort }}
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "superset-helm.selectorLabels" . | nindent 4 }}-redis
+{{- end }}

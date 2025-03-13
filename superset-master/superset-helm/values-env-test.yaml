@@ -1,0 +1,17 @@
+envmap:
+  APP_NAME  : "xsmtest.dryice-aws.com"
+  DB_IDENK  : "bludb"
+  DB_HOST  : "sxqa-qa-superset-pgsql.capsvhorlrba.ap-south-1.rds.amazonaws.com"
+  DB_VENDOR  : "postgresql"
+  SM_IDENK  : "DBCred-app-sxqa-qa-superset-pgsql"
+  REGION_NAME  : "ap-south-1"
+  DB_SCHEMA  : "bluadmin"
+  APP_SX_DOMAIN  : "https://xsmtest.dryice-aws.com"
+  ANALYTICS_DOMAIN  : "https://analyticstest.dryice-aws.com"
+  REDIS_SM : "AppCred_sxqa_redis"
+  VAULT_ENABLED: "'FALSE'"
+  VAULT_URL: "'http://openbao-test-0.openbao-test-internal:8200/v1/database/static-creds/DBCred-app-sxqa-qa-superset-pgsql'"
+  VAULT_URL_REDIS: "'http://openbao-test-0.openbao-test-internal:8200/v1/secret/data/AppCred_sxqa_redis'"
+  VAULT_TOKEN_PATH: "'/data/openbao/root-token.txt'"
+
+
